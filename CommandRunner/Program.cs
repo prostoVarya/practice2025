@@ -1,6 +1,6 @@
 ﻿using CommandLib;
 using System;
-using System.Reflection;
+using System.IO;
 
 namespace CommandRunner
 {
@@ -8,12 +8,16 @@ namespace CommandRunner
     {
         static void Main(string[] args)
         {
-            var directorySizeCommand = new FileSystemCommands.DirectorySizeCommand("C:\Users\Dell\Desktop\practice2025");
+            var tempDir = Path.GetTempPath();
+            
+            var directorySizeCommand = new FileSystemCommands.DirectorySizeCommand(tempDir);
             directorySizeCommand.Execute();
 
-            var findFilesCommand = new FileSystemCommands.FindFilesCommand("C:\Users\Dell\Desktop\practice2025", "*.txt");
+            var findFilesCommand = new FileSystemCommands.FindFilesCommand(tempDir, "*.*");
             findFilesCommand.Execute();
         }
     }
 }
+
+
 

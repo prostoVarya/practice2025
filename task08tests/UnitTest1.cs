@@ -3,36 +3,43 @@ using System;
 using System.IO;
 using Xunit;
 
-public class FileSystemCommandsTests
+public class FileSystemCommandsTests : IDisposable
 {
+    private readonly string _testDir;
+
+    public FileSystemCommandsTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testDir))
+        {
+            Directory.Delete(_testDir, true);
+        }
+    }
+
     [Fact]
     public void DirectorySizeCommand_ShouldCalculateSize()
     {
-        var testDir = Path.Combine(Path.GetTempPath(), "TestDir");
-        Directory.CreateDirectory(testDir);
-        File.WriteAllText(Path.Combine(testDir, "test1.txt"), "Hello");
-        File.WriteAllText(Path.Combine(testDir, "test2.txt"), "World");
+        File.WriteAllText(Path.Combine(_testDir, "test1.txt"), "Hello");
+        File.WriteAllText(Path.Combine(_testDir, "test2.txt"), "World");
 
-        var command = new DirectorySizeCommand(testDir);
-        command.Execute(); // Проверяем, что не возникает исключений
-
-        long expectedSize = new FileInfo(Path.Combine(testDir, "test1.txt")).Length +
-                            new FileInfo(Path.Combine(testDir, "test2.txt")).Length;
-
-        Directory.Delete(testDir, true);
+        var command = new DirectorySizeCommand(_testDir);
+        var exception = Record.Exception(() => command.Execute());
+        Assert.Null(exception);
     }
 
     [Fact]
     public void FindFilesCommand_ShouldFindMatchingFiles()
     {
-        var testDir = Path.Combine(Path.GetTempPath(), "TestDir");
-        Directory.CreateDirectory(testDir);
-        File.WriteAllText(Path.Combine(testDir, "file1.txt"), "Text");
-        File.WriteAllText(Path.Combine(testDir, "file2.log"), "Log");
+        File.WriteAllText(Path.Combine(_testDir, "file1.txt"), "Text");
+        File.WriteAllText(Path.Combine(_testDir, "file2.log"), "Log");
 
-        var command = new FindFilesCommand(testDir, "*.txt");
-        command.Execute(); // Должен найти 1 файл
-
-        Directory.Delete(testDir, true);
+        var command = new FindFilesCommand(_testDir, "*.txt");
+        var exception = Record.Exception(() => command.Execute());
+        Assert.Null(exception);
     }
 }
