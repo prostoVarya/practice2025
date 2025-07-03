@@ -7,6 +7,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 <ItemGroup>
+    <ProjectReference Include="..\FileSystemCommands\FileSystemCommands.csproj" />
+</ItemGroup>
+<ItemGroup>
   <ProjectReference Include="..\CommandLib\CommandLib.csproj" />
 </ItemGroup>
 </Project>
