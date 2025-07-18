@@ -17,10 +17,8 @@
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="..\task17\task17.csproj" />
     <ProjectReference Include="..\Interface\Interface.csproj" />
+    <ProjectReference Include="..\task17\task17.csproj" />
   </ItemGroup>
-
 </Project>

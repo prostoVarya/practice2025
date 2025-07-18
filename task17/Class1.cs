@@ -1,136 +1,117 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Threading;
-using Command;
-namespace task17
+﻿using System.Collections.Concurrent;
+using Scheduler;
+
+namespace ServerThreadSystem
 {
-    public class ServerThread : IDisposable
+    public interface IServerThreadCommand : ICommand
     {
-        private Thread _workerThread;
-        private volatile bool _isRunning;
-        private volatile bool _softStopRequested;
-        private readonly BlockingCollection<ICommand> _commandQueue = new BlockingCollection<ICommand>();
-        private IExceptionHandler _exceptionHandler;
+        public ServerThread ServerThread { get; }
 
-        public void Start()
+    }
+    public interface IServerThreadLongCommand : IServerThreadCommand, ILongCommand;
+
+    public class HardStopCommand : IServerThreadCommand
+    {
+        public ServerThread ServerThread {  get; private set; }
+
+        public HardStopCommand(ServerThread serverThread) => ServerThread = serverThread;
+
+        public void Execute()
         {
-            if (_workerThread != null && _workerThread.IsAlive)
-                return;
+            if (Thread.CurrentThread != ServerThread.Thread) ServerThread.ExceptionHandler
+                     .HandleException(this, new Exception("HardStop не может быть вызыван для текущего потока"));
 
-            _isRunning = true;
-            _softStopRequested = false;
-            _workerThread = new Thread(ProcessCommands)
+            ServerThread.IsWorking = false;
+        }
+    }
+    public class SoftStopCommand : IServerThreadCommand
+    {
+        public ServerThread ServerThread { get; private set; }
+
+        public SoftStopCommand(ServerThread serverThread) => ServerThread = serverThread;
+
+        public void Execute()
+        {
+            if (Thread.CurrentThread != ServerThread.Thread) ServerThread.ExceptionHandler
+                     .HandleException(this, new Exception("SoftStop не может быть вызыван для текущего потока"));
+
+            ServerThread.SoftStop = true;
+        }
+
+    }
+
+    public class DefaultExceptionHandler : IExceptionHandler
+    {
+        public void HandleException(ICommand command, Exception ex) =>
+            Console.WriteLine($"Команда {command.GetType()} вызвала исключение с сообщением {ex.Message}");
+    }
+    public class ServerThread
+    {
+        public Thread Thread { get; }
+
+        public BlockingCollection<IServerThreadCommand> Commands { get; private set; } = new BlockingCollection<IServerThreadCommand>();
+        public IScheduler Scheduler { get; private set; } = new RoundRobinScheduler();
+        public bool IsWorking { get; internal set; } = false;
+        public bool SoftStop { get; internal set; } = false;
+        public IExceptionHandler ExceptionHandler { get; private set; } = new DefaultExceptionHandler();
+
+        public ServerThread() => Thread = new Thread(_ => Work());
+        public ServerThread(IExceptionHandler exceptionHandler)
+        {
+            ExceptionHandler = exceptionHandler;
+            Thread = new Thread(_ => Work());
+        }
+
+        private void Work()
+        {
+            while (IsWorking && !(Commands.Count == 0 && SoftStop && !Scheduler.HasCommand()))
             {
-                IsBackground = true,
-                Name = "ServerThread Worker"
-            };
-            _workerThread.Start();
-        }
 
-        public void AddCommand(ICommand command)
-        {
-            if (!_isRunning)
-                throw new InvalidOperationException("ServerThread не запущен");
-
-            _commandQueue.Add(command);
-        }
-
-        public void SetExceptionHandler(IExceptionHandler handler)
-        {
-            _exceptionHandler = handler;
-        }
-
-        private void ProcessCommands()
-        {
-            try
-            {
-                while (_isRunning)
+                if (Commands.TryTake(out var currCommand))
                 {
-                    if (_commandQueue.TryTake(out ICommand command, Timeout.Infinite))
+                    try
                     {
-                        ExecuteCommand(command);
+                        if (currCommand is IServerThreadLongCommand longCurrCommand) Scheduler.Add(currCommand);
+                        else currCommand.Execute();
                     }
-
-                    if (_softStopRequested && _commandQueue.Count == 0)
+                    catch (Exception ex)
                     {
-                        _isRunning = false;
+                        ExceptionHandler.HandleException(currCommand, ex);
                     }
                 }
+
+                if (Scheduler.HasCommand())
+                {
+                    var schedulerCurrCommand = Scheduler.Select();
+                    if (schedulerCurrCommand == null) continue;
+                    try
+                    {
+                        schedulerCurrCommand.Execute();
+                    }
+                    catch (Exception ex)
+                    {
+                        ExceptionHandler.HandleException(schedulerCurrCommand, ex);
+                    }
+                }
+
             }
-            finally
-            {
-                _commandQueue.CompleteAdding();
-            }
+            IsWorking = false;
         }
-
-        private void ExecuteCommand(ICommand command)
+        public void Start()
         {
-            try
-            {
-                command.Execute();
-            }
-            catch (Exception ex)
-            {
-                _exceptionHandler?.HandleException(command, ex);
-            }
+            if (IsWorking) return;
+
+            IsWorking = true;
+            Thread.Start();
         }
 
-        public void RequestHardStop()
+        public void AddCommand(IServerThreadCommand command)
         {
-            if (Thread.CurrentThread != _workerThread)
-                throw new InvalidOperationException("HardStop можно вызвать только из ServerThread");
+            if (!IsWorking) ExceptionHandler.HandleException(command, new Exception("Сервер не запущен"));
+            if (command.ServerThread != this) ExceptionHandler.HandleException(command, new Exception("Команда не может быть вызвана для текущего потока"));
 
-            _isRunning = false;
+            Commands.Add(command);
         }
 
-        public void RequestSoftStop()
-        {
-            if (Thread.CurrentThread != _workerThread)
-                throw new InvalidOperationException("SoftStop можно вызвать только из ServerThread");
-
-            _softStopRequested = true;
-        }
-
-        public void Dispose()
-        {
-            _isRunning = false;
-            _commandQueue.Dispose();
-            _workerThread?.Join();
-        }
-    }
-
-    public interface IExceptionHandler
-    {
-        void HandleException(ICommand command, Exception exception);
-    }
-
-    public class HardStopCommand : ICommand
-    {
-        private readonly ServerThread _targetThread;
-
-        public HardStopCommand(ServerThread targetThread)
-        {
-            _targetThread = targetThread ?? throw new ArgumentNullException(nameof(targetThread));
-        }
-
-        public void Execute()
-        {
-            _targetThread.RequestHardStop();
-        }
-    }
-
-    public class SoftStopCommand : ICommand
-    {
-        private readonly ServerThread _targetThread;
-
-        public SoftStopCommand(ServerThread targetThread)
-        {
-            _targetThread = targetThread ?? throw new ArgumentNullException(nameof(targetThread));
-        }
-
-        public void Execute()
-        {
-            _targetThread.RequestSoftStop();
-        }
     }
 }
